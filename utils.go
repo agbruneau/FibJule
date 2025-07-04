@@ -27,14 +27,11 @@ type progressData struct {
 //
 // Concept:
 // A dedicated goroutine continuously listens on a shared channel (progress).
-// It collects percentages from each task and refreshes a single line
+// It collects percentages from the task and refreshes a single line
 // on the terminal to display the overall status. The `\r` (carriage return) trick
 // allows rewriting on the same line, creating a smooth progress animation.
-func progressPrinter(ctx context.Context, progress <-chan progressData, taskNames []string) {
-	status := make(map[string]float64)
-	for _, name := range taskNames {
-		status[name] = 0.0 // Initialize progress of each task to 0%
-	}
+func progressPrinter(ctx context.Context, progress <-chan progressData, taskName string) {
+	var currentPct float64 = 0.0 // Initialize progress to 0%
 
 	ticker := time.NewTicker(progressRefreshInterval)
 	defer ticker.Stop()
@@ -43,40 +40,39 @@ func progressPrinter(ctx context.Context, progress <-chan progressData, taskName
 		select {
 		case p, ok := <-progress:
 			if !ok { // Channel is closed, signifies end of progress updates.
-				printStatus(status, taskNames) // Print one last time
-				fmt.Println()                  // Move to a new line after all progress is done
+				printStatus(taskName, currentPct) // Print one last time
+				fmt.Println()                     // Move to a new line after all progress is done
 				return
 			}
-			status[p.name] = p.pct
-			printStatus(status, taskNames) // Print current status
+			// Ensure the name matches, though with one task it always should.
+			if p.name == taskName {
+				currentPct = p.pct
+			}
+			printStatus(taskName, currentPct) // Print current status
 
 		case <-ticker.C:
 			// Periodically refresh display to show the program is still active,
 			// even if no new progress updates have been received.
-			printStatus(status, taskNames)
+			printStatus(taskName, currentPct)
 
 		case <-ctx.Done():
 			// Main context is done (e.g., timeout or cancellation), stop displaying.
 			// Print one last status before exiting, then a newline.
-			printStatus(status, taskNames)
+			printStatus(taskName, currentPct)
 			fmt.Println()
 			return
 		}
 	}
 }
 
-// printStatus displays the current progress status for each task on a single line.
-func printStatus(status map[string]float64, keys []string) {
+// printStatus displays the current progress status on a single line.
+func printStatus(taskName string, pct float64) {
 	var b strings.Builder
 	b.WriteString("\r") // Carriage return to overwrite the previous line
 
-	for i, k := range keys {
-		if i > 0 {
-			b.WriteString("   ") // Separator between tasks
-		}
-		// Format string for aligned display: Task Name: XX.YY%
-		fmt.Fprintf(&b, "%-15s %6.2f%%", k+":", status[k])
-	}
+	// Format string for aligned display: Task Name: XX.YY%
+	fmt.Fprintf(&b, "%-15s %6.2f%%", taskName+":", pct)
+
 	// Add trailing spaces to clear any remnants of a longer previous line.
 	// Adjust the number of spaces if task names or formatting changes significantly.
 	b.WriteString("                    ") // Increased padding
